@@ -21,13 +21,33 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/styles.css?v=295d6cc1">
+<link rel="stylesheet" href="assets/styles.css?v=f1be843c">
+<link rel="preload" as="image" href="img/logo.png" fetchpriority="high">
+<script>
+/* EKRAN POWITALNY - zapala klasy PRZED pierwszą klatką. Musi stać w <head>
+   i BEZ defer: z defer przez ułamek sekundy widać stronę, a potem kurtynę.
+   Gra RAZ na wizytę; ?intro w adresie = zagraj ponownie (do pokazywania).
+   Automaty (navigator.webdriver) go nie oglądają - chyba że z ?intro. */
+(function(){try{
+  var h=document.documentElement;
+  if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches)return;
+  var znowu=/[?&]intro(=|&|$)/.test(location.search);
+  if(!znowu){
+    if(navigator.webdriver)return;
+    try{
+      if(sessionStorage.getItem('er_wejscie'))return;
+      sessionStorage.setItem('er_wejscie','1');
+    }catch(e){}
+  }
+  h.classList.add('intro-on');
+}catch(e){}})();
+</script>
 </head>
 <body>
 
 <header class="nav">
   <div class="wrap nav-inner">
-    <a class="brand brand-has-logo" href="index.html"><img class="brand-logo" src="img/logo.png" alt="Electro-ROM" width="2157" height="626" decoding="async"></a>
+    <a class="brand brand-has-logo" href="index.html"><img class="brand-logo" src="img/logo.png" alt="Electro-ROM" width="1500" height="423" decoding="async"></a>
     <nav class="nav-links">
       <a href="oferta.html">Oferta</a>
       <a href="realizacje.html">Realizacje</a>
@@ -38,6 +58,132 @@
     <button class="nav-toggle" aria-label="Menu"><span></span><span></span><span></span></button>
   </div>
 </header>
+
+<div class="intro-kurtyna" aria-hidden="true"><i class="ik-przewod"><b></b></i><i class="ik-krawedz"></i></div>
+<script>
+/* EKRAN POWITALNY - pomiar i takty. Stoi TUŻ ZA </header> celowo: z końca strony
+   (main.js) start wypada ~300 ms później, a całe wejście ma budżet ~1,5 s.
+   Kurtyna NIE RUSZA, dopóki logo nie jest pobrane I ZDEKODOWANE - inaczej takt
+   wyłaniania gra na pustym miejscu, a plik pojawia się w połowie przelotu. */
+(function(){
+  var h=document.documentElement;
+  if(!h.classList.contains('intro-on'))return;
+
+  var kurtyna=document.querySelector('.intro-kurtyna');
+  var obraz=document.querySelector('.nav .brand-logo');
+  var MIN=720,SUFIT=900,CZEKANIE=1400;   /* SUFIT policzony WSTECZ z budżetu ~1,6 s */
+  var zamkniete=false,start=0,zaladowane=false,hero=null,ogloszone=false;
+
+  /* Tytuł hero czeka na to zdarzenie i wjeżdża dopiero, gdy płachta odsłoni
+     jego miejsce. Bezpiecznik na wypadek awarii wejścia siedzi w main.js. */
+  function ogloszKoniec(){
+    if(ogloszone)return;
+    ogloszone=true;
+    try{document.dispatchEvent(new Event('wejscie:koniec'));}
+    catch(e){var z=document.createEvent('Event');z.initEvent('wejscie:koniec',false,false);
+             document.dispatchEvent(z);}
+  }
+  function sprzataj(){
+    ogloszKoniec();
+    if(zamkniete)return;
+    zamkniete=true;
+    h.classList.remove('intro-on','intro-gra','intro-out','intro-iskra','intro-mierze');
+    h.classList.add('intro-po');
+  }
+  if(!kurtyna||!obraz){sprzataj();return;}
+
+  /* Spóźnionego wejścia nie gramy: kto już czekał na stronę na wolnym łączu,
+     ma ją zobaczyć od razu, a nie dostać jeszcze kurtynę na wierzch. */
+  function zaPozno(){return !!(window.performance&&performance.now&&performance.now()>1400);}
+  if(zaPozno()){sprzataj();return;}
+
+  /* Rozmiar na kurtynie i cel lotu MIERZYMY. Sufit rozmiaru = piksele pliku
+     podzielone przez gęstość ekranu - powyżej tego znak byłby miękki na telefonie. */
+  function wymiary(){
+    h.classList.add('intro-mierze');
+    var r=obraz.getBoundingClientRect();
+    var b=obraz.parentNode.getBoundingClientRect();   /* blok marki z odstępami - rezerwa miejsca w pasku */
+    h.classList.remove('intro-mierze');
+    if(!r.width||!r.height)return false;
+    var gestosc=Math.min(window.devicePixelRatio||1,3);
+    var sufit=(obraz.naturalWidth||1500)/gestosc;
+    var cel=(window.innerWidth<680)?Math.min(window.innerWidth*0.74,320)
+                                   :Math.min(window.innerWidth*0.42,500);
+    cel=Math.max(r.width,Math.min(cel,sufit));
+    h.style.setProperty('--i-w',Math.round(cel)+'px');
+    h.style.setProperty('--i-h',Math.round(cel*r.height/r.width)+'px');
+    h.style.setProperty('--i-zmniejsz',(r.width/cel).toFixed(4));   /* zawsze <= 1 */
+    h.style.setProperty('--i-px',Math.round(r.left+r.width/2-window.innerWidth/2)+'px');
+    h.style.setProperty('--i-py',Math.round(r.top+r.height/2-window.innerHeight/2)+'px');
+    h.style.setProperty('--i-baza-w',b.width.toFixed(2)+'px');
+    h.style.setProperty('--i-baza-h',b.height.toFixed(2)+'px');
+    return true;
+  }
+
+  /* Pod zasłoną liczy się JEDNO zdjęcie - hero. `complete` = pobrane, decode() = narysowane. */
+  var heroNarysowany=false,heroPytany=false;
+  function heroGotowe(){
+    if(heroNarysowany)return true;
+    if(!hero)hero=document.querySelector('.hero-fach .hf-photo');
+    if(!(hero&&hero.complete&&hero.naturalWidth>0))return false;
+    if(!hero.decode){heroNarysowany=true;return true;}
+    if(!heroPytany){
+      heroPytany=true;
+      hero.decode().then(function(){heroNarysowany=true;},function(){heroNarysowany=true;});
+    }
+    return heroNarysowany;
+  }
+  function moze(){
+    if(zamkniete)return;
+    if(Date.now()-start>=MIN&&(heroGotowe()||zaladowane))zejdz();
+    else setTimeout(moze,70);
+  }
+  function zejdz(){
+    if(zamkniete||h.classList.contains('intro-out'))return;
+    h.classList.add('intro-out');
+    setTimeout(ogloszKoniec,420);        /* płachta minęła miejsce tytułu - hero rusza */
+    setTimeout(sprzataj,800);            /* po przelocie znaku do paska (.76 s) */
+  }
+  function graj(){
+    if(zamkniete)return;
+    if(zaPozno()){sprzataj();return;}
+    if(!wymiary()){sprzataj();return;}   /* nie ma czego mierzyć - lepiej bez wejścia */
+    start=Date.now();
+    /* DWIE klatki: po jednej przeglądarka skleja stan startowy z końcowym */
+    requestAnimationFrame(function(){requestAnimationFrame(function(){
+      if(zamkniete)return;
+      h.classList.add('intro-gra');
+      moze();
+      setTimeout(function(){if(!zamkniete)h.classList.add('intro-iskra');},640);  /* iskra gaśnie na końcu przewodu */
+      setTimeout(zejdz,SUFIT);
+      setTimeout(sprzataj,3600);         /* twardy bezpiecznik, niezależny od wszystkiego */
+    });});
+  }
+
+  function pobrane(){return obraz.complete&&obraz.naturalWidth>0;}
+  function zacznij(){
+    if(zamkniete)return;
+    if(obraz.decode)obraz.decode().then(graj,graj);
+    else graj();
+  }
+  if(pobrane())zacznij();
+  else{
+    obraz.addEventListener('load',zacznij);
+    obraz.addEventListener('error',sprzataj);         /* logo nie doszło = żadnego wejścia */
+    setTimeout(function(){pobrane()?zacznij():sprzataj();},CZEKANIE);
+  }
+  window.addEventListener('load',function(){zaladowane=true;});
+
+  /* Klik / dotyk / klawisz / przewinięcie przerywa natychmiast. */
+  var y0=window.scrollY||0;
+  ['click','touchstart','keydown'].forEach(function(z){
+    window.addEventListener(z,sprzataj,{passive:true});
+  });
+  window.addEventListener('scroll',function(){
+    if(Math.abs((window.scrollY||0)-y0)>6)sprzataj();
+  },{passive:true});
+})();
+</script>
 
 <main>
 <section class="hero-fach">
@@ -267,7 +413,7 @@
   <div class="wrap">
     <div class="foot-grid">
       <div class="foot-brand">
-        <div class="name">Electro-ROM</div>
+        <img class="foot-logo" src="img/logo.png" alt="Electro-ROM" width="1500" height="423" loading="lazy" decoding="async">
         <p>Od wymiany gniazdka po instalację całego domu. Ty mówisz, co się dzieje - ja mówię, ile i kiedy.</p>
       </div>
       <div class="foot-col">
@@ -297,6 +443,6 @@
 <div class="sticky-call"><a class="sc-call" href="tel:+48663124403"><svg class="ico-tel" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.46.58 3.6a1 1 0 0 1-.25 1l-2.23 2.2Z" fill="currentColor"/></svg> Zadzwoń</a><a class="sc-quote" href="kontakt.html">Umów termin</a></div>
 <div class="demo-wazne" data-do="2026-09-30" data-cykl="3" hidden><svg class="dw-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.6" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.2V12l3.3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="dw-txt"></span></div>
 
-<script src="assets/main.js"></script>
+<script src="assets/main.js?v=46df4e80"></script>
 </body>
 </html>
